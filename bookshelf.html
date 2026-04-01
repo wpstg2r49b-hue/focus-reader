@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Bookshelf — Focus Reader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@300;400&family=Noto+Serif+SC:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0c0b09; --surface:#111009; --surface2:#161410;
+  --border:#242018; --border2:#2e2a1e;
+  --gold:#c8a96e; --gold-dim:#6b5a38; --gold-faint:#1e1a12;
+  --text:#e2d9c5; --text-mid:#8a7d65; --text-dim:#3d3829;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Lora',serif;min-height:100vh}
+
+/* ── Top bar ── */
+#topbar{
+  position:fixed;top:0;left:0;right:0;height:58px;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 32px;background:var(--bg);border-bottom:1px solid var(--border);z-index:100;
+}
+#logo-wrap{display:flex;align-items:baseline;gap:12px}
+#logo{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.22em;color:var(--text-dim);text-transform:uppercase}
+#shelf-label{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.15em;color:var(--gold-dim);text-transform:uppercase}
+.btn{
+  font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.1em;
+  color:var(--text-mid);background:none;border:1px solid var(--border);
+  padding:7px 14px;cursor:pointer;text-transform:uppercase;
+  transition:color .15s,border-color .15s,background .15s;
+  white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;
+}
+.btn:hover{color:var(--gold);border-color:var(--gold-dim)}
+.btn.danger{color:var(--text-dim)}
+.btn.danger:hover{color:#c0503a;border-color:#6b2a1f}
+
+/* ── Main ── */
+#content{padding:86px 32px 80px;max-width:1160px;margin:0 auto}
+.section-head{
+  font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.2em;
+  color:var(--text-dim);text-transform:uppercase;
+  margin-bottom:32px;display:flex;align-items:center;gap:16px;
+}
+.section-head::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* ── Empty state ── */
+#empty-state{
+  display:none;flex-direction:column;align-items:center;
+  gap:16px;padding:80px 20px;text-align:center;
+}
+#empty-state.show{display:flex}
+#empty-msg{
+  font-family:'DM Mono',monospace;font-size:12px;letter-spacing:.16em;
+  color:var(--text-dim);text-transform:uppercase;line-height:2.4;
+}
+
+/* ── Book grid — wider min so cards feel roomy ── */
+#grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  gap:22px;
+}
+
+/* ── Book card ── */
+.book-card{
+  background:var(--surface);border:1px solid var(--border);
+  display:flex;flex-direction:column;
+  cursor:default; /* body is for reading/renaming, not navigation */
+  transition:border-color .2s,box-shadow .2s;
+  position:relative;overflow:hidden;
+}
+.book-card:hover{border-color:var(--gold-dim);box-shadow:0 0 0 1px var(--gold-faint)}
+
+/* Left spine bar */
+.book-card::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:var(--gold-dim);opacity:.35;transition:opacity .2s;
+}
+.book-card:hover::before{opacity:.85}
+
+/* Cover area — THE click target to open the book */
+.card-cover{
+  height:130px;background:var(--surface2);
+  display:flex;align-items:center;justify-content:center;
+  border-bottom:1px solid var(--border);overflow:hidden;position:relative;
+  cursor:pointer;
+}
+.card-cover::after{
+  content:'';position:absolute;inset:0;
+  background:repeating-linear-gradient(
+    45deg,transparent,transparent 7px,
+    rgba(200,169,110,.022) 7px,rgba(200,169,110,.022) 8px
+  );
+  pointer-events:none;
+}
+.cover-glyph{
+  font-size:36px;opacity:.16;user-select:none;line-height:1;z-index:1;
+}
+.cover-glyph.zh{font-family:'Noto Serif SC',serif}
+
+/* Overlay lives inside .card-cover so it never touches the body */
+.card-overlay{
+  position:absolute;inset:0;background:rgba(12,11,9,.76);
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;transition:opacity .2s;pointer-events:none;z-index:3;
+}
+.card-overlay span{
+  font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.22em;
+  color:var(--gold);text-transform:uppercase;
+}
+.card-cover:hover .card-overlay{ opacity:1; }
+
+/* Card body */
+.card-body{
+  padding:14px 16px 14px;
+  flex:1;display:flex;flex-direction:column;gap:10px;
+  position:relative;z-index:2; /* above overlay */
+  background:var(--surface);  /* solid bg so it's never obscured */
+}
+
+/* ── Editable title ── */
+.card-title{
+  font-family:'Lora',serif;font-size:14px;font-weight:500;
+  color:var(--text);line-height:1.5;
+  background:none;border:none;border-bottom:1px solid transparent;
+  outline:none;width:100%;resize:none;overflow:hidden;
+  cursor:text;           /* always show text cursor — body is always safe */
+  padding:0 0 2px;
+  transition:color .15s, border-color .15s;
+}
+.book-card:hover .card-title{ border-bottom-color:var(--border2); }
+.card-title:focus{ color:var(--gold); border-bottom-color:var(--gold-dim); }
+
+/* Rename hint */
+.card-rename-hint{
+  font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.14em;
+  color:var(--text-dim);text-transform:uppercase;
+  opacity:0;transition:opacity .2s;margin-top:2px;
+  display:flex;align-items:center;gap:4px;
+}
+.card-rename-hint::before{ content:'✎'; font-size:9px; }
+.book-card:hover .card-rename-hint{ opacity:.45; }
+.card-title:focus ~ .card-rename-hint{ opacity:0 !important; }
+
+/* Original PDF filename — shown as subtitle when title has been customised */
+.card-filename{
+  font-family:'DM Mono',monospace;font-size:9px;
+  color:var(--text-dim);letter-spacing:.04em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  opacity:.5;margin-top:2px;
+  display:none;
+}
+
+/* Progress */
+.card-prog-bar{height:1px;background:var(--border);margin-top:auto;margin-bottom:6px;overflow:hidden}
+.card-prog-fill{height:100%;background:var(--gold);transition:width .4s ease}
+.card-meta{display:flex;justify-content:space-between;align-items:center}
+.card-pct{font-family:'DM Mono',monospace;font-size:11px;color:var(--text-mid);letter-spacing:.06em}
+.card-count{font-family:'DM Mono',monospace;font-size:10px;color:var(--text-dim);letter-spacing:.05em}
+.card-lang-tag{
+  font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.14em;
+  color:var(--gold-dim);text-transform:uppercase;border:1px solid var(--border);
+  padding:2px 6px;margin-left:5px;
+}
+
+/* Delete × */
+.card-del{
+  position:absolute;top:9px;right:9px;
+  width:24px;height:24px;display:flex;align-items:center;justify-content:center;
+  background:none;border:none;cursor:pointer;
+  font-size:16px;line-height:1;color:var(--text-dim);
+  opacity:0;transition:opacity .15s,color .15s;z-index:20;
+}
+.book-card:hover .card-del{opacity:.45}
+.card-del:hover{color:#c0503a;opacity:1!important}
+
+/* ── Add card ── */
+.add-card{
+  background:none;border:1px dashed var(--border);min-height:230px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:12px;cursor:pointer;position:relative;
+  transition:border-color .2s,background .2s;
+}
+.add-card input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer}
+.add-card:hover{border-color:var(--gold-dim);background:var(--gold-faint)}
+.add-plus{font-size:28px;color:var(--text-dim);opacity:.35;line-height:1}
+.add-label{
+  font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.15em;
+  color:var(--text-dim);text-transform:uppercase;text-align:center;line-height:2.2;
+}
+
+/* ── Upload overlay ── */
+#upload-overlay{
+  position:fixed;inset:0;background:rgba(12,11,9,.9);
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:300;
+}
+#upload-overlay.show{display:flex}
+#upload-bar-wrap{width:360px;max-width:80vw;height:1px;background:var(--border)}
+#upload-bar{height:100%;width:0;background:var(--gold);transition:width .2s ease}
+#upload-msg{font-family:'DM Mono',monospace;font-size:12px;letter-spacing:.14em;color:var(--text-dim)}
+
+/* ── Confirm overlay ── */
+#confirm-overlay{
+  position:fixed;inset:0;background:rgba(12,11,9,.88);
+  display:none;align-items:center;justify-content:center;z-index:400;
+}
+#confirm-overlay.show{display:flex}
+#confirm-box{
+  background:var(--surface);border:1px solid var(--border);
+  padding:32px 36px;display:flex;flex-direction:column;gap:20px;
+  max-width:380px;width:90vw;
+}
+#confirm-text{
+  font-family:'DM Mono',monospace;font-size:12px;letter-spacing:.09em;
+  color:var(--text-mid);line-height:1.9;
+}
+#confirm-btns{display:flex;gap:10px;justify-content:flex-end}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div id="logo-wrap">
+    <span id="logo">focus reader</span>
+    <span id="shelf-label">/ bookshelf</span>
+  </div>
+  <a href="index.html" class="btn">← reader</a>
+</div>
+
+<div id="content">
+  <div class="section-head">your library</div>
+
+  <div id="empty-state">
+    <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
+      <rect x="6" y="5" width="20" height="28" rx="2" stroke="#c8a96e" stroke-width="1.2"/>
+      <path d="M20 5v8h6" stroke="#c8a96e" stroke-width="1.2"/>
+      <rect x="16" y="11" width="20" height="28" rx="2" stroke="#c8a96e" stroke-width="1.2" stroke-dasharray="3 3"/>
+    </svg>
+    <div id="empty-msg">your bookshelf is empty<br>use the + card to add a pdf or txt</div>
+  </div>
+
+  <div id="grid"></div>
+</div>
+
+<div id="upload-overlay">
+  <div id="upload-msg">processing…</div>
+  <div id="upload-bar-wrap"><div id="upload-bar"></div></div>
+</div>
+
+<div id="confirm-overlay">
+  <div id="confirm-box">
+    <div id="confirm-text">remove this book?</div>
+    <div id="confirm-btns">
+      <button class="btn" id="btn-cancel-del">cancel</button>
+      <button class="btn danger" id="btn-confirm-del">remove</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+'use strict';
+if (typeof pdfjsLib !== 'undefined')
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+/* ── Storage ──────────────────────────────────────────────────────────────── */
+function loadShelf() {
+  try { return JSON.parse(localStorage.getItem('focusreader_shelf') || '[]'); }
+  catch(e) { return []; }
+}
+function saveShelf(shelf) {
+  try { localStorage.setItem('focusreader_shelf', JSON.stringify(shelf)); }
+  catch(e) { console.warn('Storage quota exceeded — shelf may not persist fully.'); }
+}
+
+/* ── Language ─────────────────────────────────────────────────────────────── */
+function isChinese(text) {
+  const cjk = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+  return cjk / text.length > 0.15;
+}
+
+/* ── Sentence splitting ───────────────────────────────────────────────────── */
+function splitSentences(rawText) {
+  const zh = isChinese(rawText);
+  let text = rawText
+    .replace(/(\w)-\s*\n\s*(\w)/g, '$1$2')
+    .replace(/\s+/g, ' ').trim();
+  if (zh) {
+    text = text.replace(/([。！？…]+)/g, '$1\n');
+  } else {
+    text = text.replace(/([.!?…])\s+([A-Z"'])/g, '$1\n$2');
+  }
+  return text.split('\n').map(s => s.trim())
+    .filter(s => s.length > (zh ? 4 : 10) && /[\u4e00-\u9fffA-Za-z]/.test(s));
+}
+
+/* ── PDF extraction ───────────────────────────────────────────────────────── */
+const uploadOverlay = document.getElementById('upload-overlay');
+const uploadBar     = document.getElementById('upload-bar');
+const uploadMsg     = document.getElementById('upload-msg');
+
+function setMsg(m)  { uploadMsg.textContent = m; }
+function setProg(p) { uploadBar.style.width = (p * 100) + '%'; }
+
+async function extractPDFText(file) {
+  const buf = await file.arrayBuffer();
+  setProg(0.12); setMsg('parsing pages…');
+  const pdf   = await pdfjsLib.getDocument({ data: buf }).promise;
+  const total = pdf.numPages;
+  let full = '';
+  for (let p = 1; p <= total; p++) {
+    const page    = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    let lastY = null, pt = '';
+    for (const item of content.items) {
+      if (!('str' in item)) continue;
+      if (lastY !== null && Math.abs(item.transform[5] - lastY) > 12) pt += ' ';
+      pt += item.str; lastY = item.transform[5];
+    }
+    full += pt + ' ';
+    setProg(0.12 + 0.76 * (p / total));
+    setMsg(`page ${p} of ${total}…`);
+  }
+  return full;
+}
+
+async function processFile(file) {
+  if (!file) return;
+  uploadBar.style.width = '0';
+  uploadOverlay.classList.add('show');
+  setProg(0.04); setMsg('reading file…');
+  try {
+    let raw = '';
+    if (file.name.toLowerCase().endsWith('.pdf')) {
+      if (typeof pdfjsLib === 'undefined') {
+        setMsg('PDF.js failed to load.'); setTimeout(() => uploadOverlay.classList.remove('show'), 2500); return;
+      }
+      raw = await extractPDFText(file);
+    } else {
+      raw = await file.text(); setProg(1);
+    }
+    setMsg('splitting sentences…');
+    const zh     = isChinese(raw);
+    const parsed = splitSentences(raw);
+    if (parsed.length < 2) {
+      setMsg('Could not extract readable text from this file.');
+      setTimeout(() => uploadOverlay.classList.remove('show'), 2500); return;
+    }
+    const name  = file.name.replace(/\.[^.]+$/, '');
+    const id    = 'book_' + Date.now();
+    const shelf = loadShelf();
+    shelf.push({ id, title: name, originalName: name, sentences: parsed, progress: 0, total: parsed.length, lang: zh ? 'zh' : 'en', added: new Date().toISOString() });
+    saveShelf(shelf);
+    uploadOverlay.classList.remove('show');
+    renderGrid();
+  } catch (err) {
+    setMsg('Error: ' + err.message);
+    console.error(err);
+    setTimeout(() => uploadOverlay.classList.remove('show'), 3000);
+  }
+}
+
+/* ── Grid rendering ───────────────────────────────────────────────────────── */
+const grid       = document.getElementById('grid');
+const emptyState = document.getElementById('empty-state');
+
+function renderGrid() {
+  grid.innerHTML = '';
+  const shelf = loadShelf();
+  if (shelf.length === 0) {
+    emptyState.classList.add('show');
+  } else {
+    emptyState.classList.remove('show');
+    shelf.forEach(book => grid.appendChild(makeCard(book)));
+  }
+  grid.appendChild(makeAddCard());
+}
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function makeCard(book) {
+  const pct      = book.total > 1 ? Math.round((book.progress / (book.total - 1)) * 100) : 0;
+  const zh       = book.lang === 'zh';
+  const origName = book.originalName || book.title;
+  const isRenamed = book.title !== origName;
+
+  const card = document.createElement('div');
+  card.className = 'book-card';
+
+  // The overlay lives INSIDE .card-cover so it never overlaps the body.
+  // Only the cover is the click target for opening — the body is entirely
+  // dedicated to renaming and showing metadata.
+  card.innerHTML = `
+    <div class="card-cover">
+      <span class="cover-glyph${zh ? ' zh' : ''}">${zh ? '文' : 'Aa'}</span>
+      <div class="card-overlay"><span>open →</span></div>
+    </div>
+    <button class="card-del" title="Remove">×</button>
+    <div class="card-body">
+      <div>
+        <textarea class="card-title" rows="2" spellcheck="false">${esc(book.title)}</textarea>
+        <div class="card-rename-hint">rename</div>
+        <div class="card-filename"${isRenamed ? ' style="display:block"' : ''}>${esc(origName)}</div>
+      </div>
+      <div style="margin-top:auto">
+        <div class="card-prog-bar"><div class="card-prog-fill" style="width:${pct}%"></div></div>
+        <div class="card-meta">
+          <span class="card-pct">${pct}% read</span>
+          <span class="card-count">${book.total} sent.<span class="card-lang-tag">${zh?'zh':'en'}</span></span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Only the cover opens the book — body is safe for interaction
+  card.querySelector('.card-cover').addEventListener('click', () => {
+    window.location.href = `index.html?book=${book.id}`;
+  });
+
+  // Editable title
+  const ta      = card.querySelector('.card-title');
+  const fnameEl = card.querySelector('.card-filename');
+
+  function autosize() { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
+  // Run autosize after paint so scrollHeight is accurate
+  requestAnimationFrame(autosize);
+
+  ta.addEventListener('input', autosize);
+  ta.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); ta.blur(); } });
+  ta.addEventListener('blur', () => {
+    const v = ta.value.trim();
+    if (!v) { ta.value = book.title; requestAnimationFrame(autosize); return; }
+    if (v === book.title) return;
+    const shelf = loadShelf();
+    const idx   = shelf.findIndex(b => b.id === book.id);
+    if (idx !== -1) {
+      shelf[idx].title = v;
+      saveShelf(shelf);
+      book.title = v;
+      const orig = shelf[idx].originalName || origName;
+      fnameEl.textContent = orig;
+      fnameEl.style.display = (v !== orig) ? 'block' : 'none';
+    }
+  });
+
+  // Delete
+  card.querySelector('.card-del').addEventListener('click', e => {
+    e.stopPropagation();
+    openConfirm(book.id, book.title);
+  });
+
+  return card;
+}
+
+function makeAddCard() {
+  const div = document.createElement('div');
+  div.className = 'add-card';
+  div.innerHTML = `
+    <input type="file" accept=".pdf,.txt">
+    <div class="add-plus">+</div>
+    <div class="add-label">add a book<br>.pdf · .txt<br>english &amp; chinese</div>
+  `;
+  div.querySelector('input').addEventListener('change', e => processFile(e.target.files[0]));
+  div.addEventListener('dragover',  e => { e.preventDefault(); div.style.borderColor='var(--gold-dim)'; div.style.background='var(--gold-faint)'; });
+  div.addEventListener('dragleave', ()  => { div.style.borderColor=''; div.style.background=''; });
+  div.addEventListener('drop',      e  => { e.preventDefault(); div.style.borderColor=''; div.style.background=''; processFile(e.dataTransfer.files[0]); });
+  return div;
+}
+
+/* ── Confirm delete ───────────────────────────────────────────────────────── */
+let _pendingId = null;
+const confirmOverlay = document.getElementById('confirm-overlay');
+const confirmText    = document.getElementById('confirm-text');
+
+function openConfirm(id, title) {
+  _pendingId = id;
+  confirmText.textContent = `Remove "${title}" from your shelf? This cannot be undone.`;
+  confirmOverlay.classList.add('show');
+}
+
+document.getElementById('btn-cancel-del').addEventListener('click', () => {
+  confirmOverlay.classList.remove('show'); _pendingId = null;
+});
+document.getElementById('btn-confirm-del').addEventListener('click', () => {
+  if (!_pendingId) return;
+  saveShelf(loadShelf().filter(b => b.id !== _pendingId));
+  confirmOverlay.classList.remove('show'); _pendingId = null;
+  renderGrid();
+});
+confirmOverlay.addEventListener('click', e => {
+  if (e.target === confirmOverlay) { confirmOverlay.classList.remove('show'); _pendingId = null; }
+});
+
+/* ── Init ─────────────────────────────────────────────────────────────────── */
+renderGrid();
+</script>
+</body>
+</html>
