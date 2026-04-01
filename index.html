@@ -328,33 +328,67 @@ function updateHUD() {
   if (currentBookId) saveProgress();
 }
 
-/* ── Bookshelf persistence ────────────────────────────────────────────────── */
+/* ── Bookshelf persistence ────────────────────────────────────────────────────
+   Architecture: the shelf INDEX stores only metadata (no sentences).
+   Sentences live separately under key  focusreader_sentences_{id}.
+   This means loadShelf() / saveProgress() never touch the large data blobs,
+   which was the memory spike crashing Safari on iPhone.
+──────────────────────────────────────────────────────────────────────────── */
 function loadShelf() {
-  try { return JSON.parse(localStorage.getItem('focusreader_shelf') || '[]'); } catch(e) { return []; }
+  try { return JSON.parse(localStorage.getItem('focusreader_shelf') || '[]'); }
+  catch(e) { return []; }
 }
 function saveShelf(shelf) {
-  localStorage.setItem('focusreader_shelf', JSON.stringify(shelf));
+  // Strip sentences before saving index — they live in their own keys
+  const lean = shelf.map(b => {
+    const { sentences: _s, ...meta } = b;
+    return meta;
+  });
+  try { localStorage.setItem('focusreader_shelf', JSON.stringify(lean)); }
+  catch(e) { console.warn('Shelf index save failed:', e); }
 }
+function loadSentences(id) {
+  try {
+    const raw = localStorage.getItem('focusreader_sentences_' + id);
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+function saveSentences(id, arr) {
+  try { localStorage.setItem('focusreader_sentences_' + id, JSON.stringify(arr)); }
+  catch(e) { console.warn('Sentences save failed (quota?):', e); }
+}
+function deleteSentences(id) {
+  try { localStorage.removeItem('focusreader_sentences_' + id); } catch(e) {}
+}
+
 function saveProgress() {
-  const shelf = loadShelf();
-  const idx = shelf.findIndex(b => b.id === currentBookId);
-  if (idx !== -1) {
-    shelf[idx].progress = current;
-    shelf[idx].total    = sentences.length;
-    saveShelf(shelf);
-  }
+  // Only update progress + total in the index — never touches sentences
+  try {
+    const shelf = loadShelf();
+    const idx   = shelf.findIndex(b => b.id === currentBookId);
+    if (idx !== -1) {
+      shelf[idx].progress = current;
+      shelf[idx].total    = sentences.length;
+      // Save lean index only
+      try { localStorage.setItem('focusreader_shelf', JSON.stringify(shelf)); }
+      catch(e) {}
+    }
+  } catch(e) {}
 }
+
 function saveBookToShelf(name, sentencesArr, zh) {
-  const shelf = loadShelf();
   const id    = 'book_' + Date.now();
+  const shelf = loadShelf();
+  // Save metadata to index (no sentences)
   shelf.push({
     id, title: name, originalName: name,
-    sentences: sentencesArr,
     progress: 0, total: sentencesArr.length,
     lang: zh ? 'zh' : 'en',
     added: new Date().toISOString()
   });
   saveShelf(shelf);
+  // Save sentences separately
+  saveSentences(id, sentencesArr);
   return id;
 }
 
@@ -495,11 +529,14 @@ function tryOpenFromURL() {
   const id     = params.get('book');
   if (!id) return false;
   const shelf  = loadShelf();
-  const book   = shelf.find(b => b.id === id);
-  if (!book) return false;
-  dropScreen.style.display='none';
+  const meta   = shelf.find(b => b.id === id);
+  if (!meta) return false;
+  // Load sentences from their own key — never from the shelf index
+  const sents  = loadSentences(id);
+  if (!sents || sents.length < 2) return false;
+  dropScreen.style.display = 'none';
   readerEl.classList.add('visible');
-  openBook(book);
+  openBook({ ...meta, sentences: sents });
   return true;
 }
 
